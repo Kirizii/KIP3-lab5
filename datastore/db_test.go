@@ -1,6 +1,7 @@
 package datastore
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -184,4 +185,52 @@ func TestDb_ParallelPutGet(t *testing.T) {
 	}
 
 	wg.Wait()
+}
+func TestDb_DetectsCorruptedValue(t *testing.T) {
+	tmp := t.TempDir()
+
+	db, err := Open(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = db.Close()
+	})
+
+	key := "sensitive"
+	value := "secret-data"
+	if err := db.Put(key, value); err != nil {
+		t.Fatalf("Put failed: %v", err)
+	}
+
+	db.mu.RLock()
+	ref, ok := db.index[key]
+	db.mu.RUnlock()
+	if !ok {
+		t.Fatal("key not found in index")
+	}
+
+	path := fmt.Sprintf("%s/segment-%d", tmp, ref.segmentId)
+	file, err := os.OpenFile(path, os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatalf("cannot open segment file: %v", err)
+	}
+	defer file.Close()
+
+	seekOffset := ref.offset + int64(12+len(key)+len(value))
+	if _, err := file.Seek(seekOffset, 0); err != nil {
+		t.Fatalf("seek failed: %v", err)
+	}
+
+	if _, err := file.Write([]byte{0x00}); err != nil {
+		t.Fatalf("write failed: %v", err)
+	}
+
+	_, err = db.Get(key)
+	if err == nil {
+		t.Fatal("expected error when reading corrupted data, got nil")
+	}
+	if !errors.Is(err, ErrCorrupted) {
+		t.Fatalf("expected ErrCorrupted, got: %v", err)
+	}
 }

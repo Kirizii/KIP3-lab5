@@ -9,6 +9,8 @@ import (
 	"io"
 )
 
+var ErrCorrupted = errors.New("data corrupted")
+
 type entry struct {
 	key, value string
 }
@@ -46,7 +48,7 @@ func (e *entry) Decode(input []byte) error {
 	actualHash := sha1.Sum([]byte(e.value))
 
 	if !equalHash(expectedHash, actualHash[:]) {
-		return fmt.Errorf("hash mismatch for key %s", e.key)
+		return ErrCorrupted
 	}
 	return nil
 }

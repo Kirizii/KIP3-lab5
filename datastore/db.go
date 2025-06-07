@@ -142,6 +142,9 @@ func (db *Db) Get(key string) (string, error) {
 
 	var record entry
 	if _, err := record.DecodeFromReader(bufio.NewReader(f)); err != nil {
+		if errors.Is(err, ErrCorrupted) {
+			return "", ErrCorrupted
+		}
 		return "", err
 	}
 	return record.value, nil
