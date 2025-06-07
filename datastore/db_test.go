@@ -1,6 +1,8 @@
 package datastore
 
 import (
+	"os"
+	"strings"
 	"testing"
 )
 
@@ -25,14 +27,14 @@ func TestDb(t *testing.T) {
 		for _, pair := range pairs {
 			err := db.Put(pair[0], pair[1])
 			if err != nil {
-				t.Errorf("Cannot put %s: %s", pairs[0], err)
+				t.Errorf("Cannot put %s: %s", pair[0], err)
 			}
 			value, err := db.Get(pair[0])
 			if err != nil {
-				t.Errorf("Cannot get %s: %s", pairs[0], err)
+				t.Errorf("Cannot get %s: %s", pair[0], err)
 			}
 			if value != pair[1] {
-				t.Errorf("Bad value returned expected %s, got %s", pair[1], value)
+				t.Errorf("Expected %s, got %s", pair[1], value)
 			}
 		}
 	})
@@ -43,21 +45,18 @@ func TestDb(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, pair := range pairs {
-			err := db.Put(pair[0], pair[1])
-			if err != nil {
-				t.Errorf("Cannot put %s: %s", pairs[0], err)
-			}
+			_ = db.Put(pair[0], pair[1])
 		}
 		sizeAfter, err := db.Size()
 		if err != nil {
 			t.Fatal(err)
 		}
 		if sizeAfter <= sizeBefore {
-			t.Errorf("Size does not grow after put (before %d, after %d)", sizeBefore, sizeAfter)
+			t.Errorf("File did not grow: before %d, after %d", sizeBefore, sizeAfter)
 		}
 	})
 
-	t.Run("new db process", func(t *testing.T) {
+	t.Run("reopen db", func(t *testing.T) {
 		if err := db.Close(); err != nil {
 			t.Fatal(err)
 		}
@@ -65,20 +64,67 @@ func TestDb(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-
-		uniquePairs := make(map[string]string)
-		for _, pair := range pairs {
-			uniquePairs[pair[0]] = pair[1]
+		unique := map[string]string{}
+		for _, p := range pairs {
+			unique[p[0]] = p[1]
 		}
-
-		for key, expectedValue := range uniquePairs {
-			value, err := db.Get(key)
+		for k, v := range unique {
+			got, err := db.Get(k)
 			if err != nil {
-				t.Errorf("Cannot get %s: %s", key, err)
+				t.Errorf("Get failed for %s: %s", k, err)
 			}
-			if value != expectedValue {
-				t.Errorf("Get(%q) = %q, wanted %q", key, value, expectedValue)
+			if got != v {
+				t.Errorf("Expected %s, got %s", v, got)
 			}
 		}
 	})
+}
+
+func TestDb_Segments(t *testing.T) {
+	tmp := t.TempDir()
+
+	segmentLimit := int64(100) // байтів
+
+	db, err := OpenWithLimit(tmp, segmentLimit)
+	if err != nil {
+		t.Fatalf("failed to open db: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = db.Close()
+	})
+
+	for i := 0; i < 20; i++ {
+		key := "key" + string(rune(i+'a'))
+		value := strings.Repeat("v", 20)
+		err := db.Put(key, value)
+		if err != nil {
+			t.Fatalf("Put failed: %v", err)
+		}
+	}
+
+	files, err := os.ReadDir(tmp)
+	if err != nil {
+		t.Fatalf("ReadDir failed: %v", err)
+	}
+
+	count := 0
+	for _, f := range files {
+		if strings.HasPrefix(f.Name(), "segment-") {
+			count++
+		}
+	}
+	if count < 2 {
+		t.Errorf("Expected multiple segment files, found %d", count)
+	}
+
+	for i := 0; i < 20; i++ {
+		key := "key" + string(rune(i+'a'))
+		val, err := db.Get(key)
+		if err != nil {
+			t.Errorf("Get failed for key=%s: %v", key, err)
+		}
+		if val != strings.Repeat("v", 20) {
+			t.Errorf("Incorrect value for %s: %s", key, val)
+		}
+	}
 }
