@@ -25,7 +25,7 @@ func TestBalancer(t *testing.T) {
 
 	for i := 0; i < 10; i++ {
 		req, _ := http.NewRequest("GET", fmt.Sprintf("%s/api/v1/some-data", baseAddress), nil)
-		req.Header.Set("X-Test-Client", "client-123") // стабільна ідентичність
+		req.Header.Set("X-Test-Client", "client-123")
 
 		resp, err := client.Do(req)
 		if err != nil {
@@ -38,7 +38,6 @@ func TestBalancer(t *testing.T) {
 		_ = resp.Body.Close()
 	}
 
-	// Перевірка: всі відповіді мають бути від одного і того ж сервера
 	assert.Equal(t, 1, len(serverSet), "Expected all responses from the same server")
 }
 
@@ -48,7 +47,7 @@ func BenchmarkBalancer(b *testing.B) {
 	}
 
 	for i := 0; i < b.N; i++ {
-		resp, err := client.Get(fmt.Sprintf("%s/api/v1/some-data", baseAddress))
+		resp, err := client.Get(fmt.Sprintf("%s/api/v1/some-data?key=invlabs", baseAddress))
 		if err != nil {
 			b.Errorf("request failed: %s", err)
 		}

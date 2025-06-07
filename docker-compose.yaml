@@ -31,3 +31,11 @@ services:
       - servers
     ports:
       - "8082:8080"
+
+  db:
+    build: .
+    command: "db"
+    networks:
+      - servers
+    ports:
+      - "8079:8079"

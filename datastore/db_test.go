@@ -87,7 +87,7 @@ func TestDb(t *testing.T) {
 func TestDb_Segments(t *testing.T) {
 	tmp := t.TempDir()
 
-	segmentLimit := int64(100) // байтів
+	segmentLimit := int64(100)
 
 	db, err := OpenWithLimit(tmp, segmentLimit)
 	if err != nil {
@@ -152,7 +152,6 @@ func TestDb_ParallelPutGet(t *testing.T) {
 
 	var wg sync.WaitGroup
 
-	// Паралельно записуємо
 	for i := 0; i < count; i++ {
 		wg.Add(1)
 		go func(i int) {
@@ -165,10 +164,8 @@ func TestDb_ParallelPutGet(t *testing.T) {
 
 	wg.Wait()
 
-	// Невелика затримка, щоб ensure запис у writeLoop завершився
 	time.Sleep(100 * time.Millisecond)
 
-	// Паралельно читаємо
 	for i := 0; i < count; i++ {
 		wg.Add(1)
 		go func(i int) {

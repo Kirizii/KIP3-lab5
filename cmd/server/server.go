@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"net/http"
 	"os"
 	"strconv"
@@ -14,8 +16,12 @@ import (
 
 var port = flag.Int("port", 8080, "server port")
 
-const confResponseDelaySec = "CONF_RESPONSE_DELAY_SEC"
-const confHealthFailure = "CONF_HEALTH_FAILURE"
+const (
+	confResponseDelaySec = "CONF_RESPONSE_DELAY_SEC"
+	confHealthFailure    = "CONF_HEALTH_FAILURE"
+	teamKey              = "invlabs"
+	dbServiceURL         = "http://db:8079"
+)
 
 func main() {
 	h := new(http.ServeMux)
@@ -31,6 +37,11 @@ func main() {
 		}
 	})
 
+	today := time.Now().Format("2006-01-02")
+	payload := map[string]string{"value": today}
+	body, _ := json.Marshal(payload)
+	_, _ = http.Post(fmt.Sprintf("%s/db/%s", dbServiceURL, teamKey), "application/json", bytes.NewReader(body))
+
 	report := make(Report)
 
 	h.HandleFunc("/api/v1/some-data", func(rw http.ResponseWriter, r *http.Request) {
@@ -41,11 +52,31 @@ func main() {
 
 		report.Process(r)
 
-		rw.Header().Set("content-type", "application/json")
+		key := r.URL.Query().Get("key")
+		if key == "" {
+			http.Error(rw, "missing key param", http.StatusBadRequest)
+			return
+		}
+
+		resp, err := http.Get(fmt.Sprintf("%s/db/%s", dbServiceURL, key))
+		if err != nil || resp.StatusCode != http.StatusOK {
+			http.NotFound(rw, r)
+			return
+		}
+		defer resp.Body.Close()
+
+		var result struct {
+			Key   string `json:"key"`
+			Value string `json:"value"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			http.Error(rw, "failed to decode db response", http.StatusInternalServerError)
+			return
+		}
+
+		rw.Header().Set("Content-Type", "application/json")
 		rw.WriteHeader(http.StatusOK)
-		_ = json.NewEncoder(rw).Encode([]string{
-			"1", "2",
-		})
+		_ = json.NewEncoder(rw).Encode(result.Value)
 	})
 
 	h.Handle("/report", report)
