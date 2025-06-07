@@ -1,0 +1,30 @@
+name: Integration and Unit Tests
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Set up Docker
+        uses: docker/setup-buildx-action@v2
+
+      - name: Build Docker image
+        run: docker build -t kpi3-lab4-build --target build .
+
+      - name: Run unit tests
+        run: docker run --rm kpi3-lab4-build go test ./... -v
+
+      - name: Run integration tests with docker-compose
+        run: |
+          docker compose -f docker-compose.yaml -f docker-compose.test.yaml up --exit-code-from test
