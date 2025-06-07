@@ -2,6 +2,7 @@ package datastore
 
 import (
 	"bufio"
+	"crypto/sha1"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -12,32 +13,54 @@ type entry struct {
 	key, value string
 }
 
-// 0           4    8     kl+8  kl+12     <-- offset
-// (full size) (kl) (key) (vl)  (value)
-// 4           4    ....  4     .....     <-- length
+// 0           4     8     kl+8    kl+12     kl+12+vl    <-- offset
+// (full size) (kl)  (key) (vl)    (value)   (hash[20])
+// 4           4     ....  4       .....     20          <-- length
 
 func (e *entry) Encode() []byte {
 	kl, vl := len(e.key), len(e.value)
-	size := kl + vl + 12
+	hash := sha1.Sum([]byte(e.value)) // [20]byte
+
+	size := kl + vl + 12 + len(hash)
 	res := make([]byte, size)
+
 	binary.LittleEndian.PutUint32(res, uint32(size))
 	binary.LittleEndian.PutUint32(res[4:], uint32(kl))
 	copy(res[8:], e.key)
 	binary.LittleEndian.PutUint32(res[kl+8:], uint32(vl))
 	copy(res[kl+12:], e.value)
+	copy(res[kl+12+vl:], hash[:])
+
 	return res
 }
 
-func (e *entry) Decode(input []byte) {
-	e.key = decodeString(input[4:])
-	e.value = decodeString(input[len(e.key)+8:])
+func (e *entry) Decode(input []byte) error {
+	kl := int(binary.LittleEndian.Uint32(input[4:]))
+	e.key = string(input[8 : 8+kl])
+
+	vl := int(binary.LittleEndian.Uint32(input[8+kl:]))
+	valueStart := 12 + kl
+	e.value = string(input[valueStart : valueStart+vl])
+
+	expectedHash := input[valueStart+vl:]
+	actualHash := sha1.Sum([]byte(e.value))
+
+	if !equalHash(expectedHash, actualHash[:]) {
+		return fmt.Errorf("hash mismatch for key %s", e.key)
+	}
+	return nil
 }
 
-func decodeString(v []byte) string {
-	l := binary.LittleEndian.Uint32(v)
-	buf := make([]byte, l)
-	copy(buf, v[4:4+int(l)])
-	return string(buf)
+func equalHash(a, b []byte) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func (e *entry) DecodeFromReader(in *bufio.Reader) (int, error) {
@@ -48,11 +71,14 @@ func (e *entry) DecodeFromReader(in *bufio.Reader) (int, error) {
 		}
 		return 0, fmt.Errorf("DecodeFromReader, cannot read size: %w", err)
 	}
-	buf := make([]byte, int(binary.LittleEndian.Uint32(sizeBuf)))
-	n, err := in.Read(buf[:])
+	size := int(binary.LittleEndian.Uint32(sizeBuf))
+	buf := make([]byte, size)
+	n, err := in.Read(buf)
 	if err != nil {
 		return n, fmt.Errorf("DecodeFromReader, cannot read record: %w", err)
 	}
-	e.Decode(buf)
+	if err := e.Decode(buf); err != nil {
+		return n, err
+	}
 	return n, nil
 }
