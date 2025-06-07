@@ -1,9 +1,12 @@
 package datastore
 
 import (
+	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 func TestDb(t *testing.T) {
@@ -127,4 +130,58 @@ func TestDb_Segments(t *testing.T) {
 			t.Errorf("Incorrect value for %s: %s", key, val)
 		}
 	}
+}
+func TestDb_ParallelPutGet(t *testing.T) {
+	tmp := t.TempDir()
+	db, err := Open(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = db.Close()
+	})
+
+	const count = 100
+	keys := make([]string, count)
+	values := make([]string, count)
+	for i := 0; i < count; i++ {
+		keys[i] = fmt.Sprintf("key-%d", i)
+		values[i] = fmt.Sprintf("value-%d", i)
+	}
+
+	var wg sync.WaitGroup
+
+	// Паралельно записуємо
+	for i := 0; i < count; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			if err := db.Put(keys[i], values[i]); err != nil {
+				t.Errorf("Put failed for key %s: %v", keys[i], err)
+			}
+		}(i)
+	}
+
+	wg.Wait()
+
+	// Невелика затримка, щоб ensure запис у writeLoop завершився
+	time.Sleep(100 * time.Millisecond)
+
+	// Паралельно читаємо
+	for i := 0; i < count; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			val, err := db.Get(keys[i])
+			if err != nil {
+				t.Errorf("Get failed for key %s: %v", keys[i], err)
+				return
+			}
+			if val != values[i] {
+				t.Errorf("Wrong value for key %s: got %s, expected %s", keys[i], val, values[i])
+			}
+		}(i)
+	}
+
+	wg.Wait()
 }
